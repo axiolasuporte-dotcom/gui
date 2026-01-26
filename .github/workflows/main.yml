@@ -1,0 +1,55 @@
+- name: Launch RustDesk + Screenshot + Upload to GoFile
+  shell: pwsh
+  run: |
+    # ---------- Locate RustDesk safely ----------
+    $rdExe = @(
+      "C:\Program Files\RustDesk\RustDesk.exe"
+      "C:\Program Files\RustDesk\rustdesk.exe"
+      "$env:LOCALAPPDATA\Programs\RustDesk\rustdesk.exe"
+    ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+
+    if (-not $rdExe) {
+      $cmd = Get-Command rustdesk.exe -ErrorAction SilentlyContinue
+      if ($cmd) { $rdExe = $cmd.Source }
+    }
+
+    if (-not $rdExe) {
+      Write-Error "RustDesk executable not found"
+      exit 1
+    }
+
+    Write-Host "RustDesk found at: $rdExe"
+
+    # ---------- Launch RustDesk ----------
+    Start-Process -FilePath $rdExe -ErrorAction SilentlyContinue
+    Start-Sleep -Seconds 5
+
+    # ---------- Screenshot ----------
+    $img = "$env:TEMP\rustdesk_${{ matrix.id }}.png"
+
+    Add-Type -AssemblyName System.Windows.Forms
+    Add-Type -AssemblyName System.Drawing
+
+    $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+    $bmp = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height
+    $gfx = [System.Drawing.Graphics]::FromImage($bmp)
+    $gfx.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
+    $bmp.Save($img, [System.Drawing.Imaging.ImageFormat]::Png)
+    $gfx.Dispose()
+    $bmp.Dispose()
+
+    Write-Host "Screenshot saved: $img"
+
+    # ---------- Upload to GoFile ----------
+    $resp = Invoke-RestMethod `
+      -Uri "https://store1.gofile.io/uploadFile" `
+      -Method Post `
+      -Form @{ file = Get-Item $img }
+
+    if ($resp.status -eq "ok") {
+      "SCREENSHOT_URL=$($resp.data.downloadPage)" | Out-File -Append $env:GITHUB_ENV
+      Write-Host "Screenshot URL: $($resp.data.downloadPage)"
+    } else {
+      Write-Error "Upload failed"
+      exit 1
+    }
