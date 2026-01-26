@@ -1,4 +1,4 @@
-- name: Launch RustDesk + Screenshot + Upload to GoFile
+name: Launch RustDesk + Screenshot + Upload to GoFile
   shell: pwsh
   run: |
     # ---------- Locate RustDesk safely ----------
