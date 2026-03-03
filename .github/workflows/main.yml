@@ -1,4 +1,4 @@
-name: RDP KDE Plasma
+name: RDP KDE Plasma (Tailscale)
 
 on:
   workflow_dispatch:
@@ -12,13 +12,14 @@ jobs:
         run: |
           set -euxo pipefail
           PASSWORD=$(openssl rand -base64 12)
-          echo "RDP_CREDS=User: rdpuser | Password: $PASSWORD" >> $GITHUB_ENV
+          echo "RDP_USER=rdpuser" >> $GITHUB_ENV
+          echo "RDP_PASS=$PASSWORD" >> $GITHUB_ENV
 
           sudo useradd -m -s /bin/bash rdpuser || true
           echo "rdpuser:$PASSWORD" | sudo chpasswd
           sudo usermod -aG sudo rdpuser
 
-      - name: Install KDE Plasma + XRDP
+      - name: Install KDE Plasma + XRDP (fixed HOME)
         run: |
           set -euxo pipefail
           sudo apt-get update
@@ -26,8 +27,7 @@ jobs:
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
             xrdp xorgxrdp \
             kde-plasma-desktop plasma-workspace \
-            dbus-x11 x11-xserver-utils \
-            firefox
+            dbus-x11 x11-xserver-utils
 
           sudo mkdir -p /home/rdpuser
           sudo chown -R rdpuser:rdpuser /home/rdpuser
@@ -44,7 +44,6 @@ jobs:
           export XDG_DATA_HOME="$HOME/.local/share"
 
           rm -f "$HOME/.Xauthority" "$HOME/.ICEauthority"
-
           mkdir -p "$HOME"
           chown -R "$USER:$USER" "$HOME" || true
 
@@ -52,15 +51,29 @@ jobs:
           EOF
 
           sudo chmod +x /etc/xrdp/startwm.sh
-
           sudo adduser xrdp ssl-cert || true
           sudo systemctl restart xrdp
 
-      - name: Show RDP Credentials
+      - name: Connect to Tailscale
+        uses: tailscale/github-action@v2
+        with:
+          authkey: ${{ secrets.TAILSCALE_AUTH_KEY }}
+          hostname: gh-rdp-${{ github.run_id }}
+
+      - name: Show RDP Access (IP + creds)
         run: |
+          set -euxo pipefail
+          TS_IP=$(tailscale ip -4)
           echo "======================"
-          echo "$RDP_CREDS"
+          echo "RDP Address (Tailscale): $TS_IP"
+          echo "User: $RDP_USER"
+          echo "Pass: $RDP_PASS"
+          echo "Port: 3389"
           echo "======================"
+
+          # quick check
+          sudo apt-get install -y netcat-openbsd
+          nc -zv localhost 3389
 
       - name: Keep Session Alive
         run: |
