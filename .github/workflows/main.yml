@@ -1,5 +1,4 @@
-steps:
-  - name: Create RDP User with Secure Password
+- name: Create RDP User with Secure Password
     run: |
       set -euxo pipefail
       PASSWORD=$(openssl rand -base64 12)
