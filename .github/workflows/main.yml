@@ -1,4 +1,4 @@
-name: Ubuntu RDP
+name: Ubuntu RDP (Modern KDE Plasma)
 
 on:
   workflow_dispatch:
@@ -18,13 +18,14 @@ jobs:
           echo "rdpuser:$PASSWORD" | sudo chpasswd
           sudo usermod -aG sudo rdpuser
 
-      - name: Install Desktop Environment and XRDP
+      - name: Install Modern Desktop Environment (KDE Plasma) and XRDP
         run: |
           sudo apt-get update
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y xfce4 xfce4-goodies xrdp netcat-openbsd
+          # Install KDE Plasma (Modern UI) and XRDP
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y kde-plasma-desktop xrdp netcat-openbsd
           
-          # Fix: Use sudo bash -c to write the file with root privileges
-          sudo bash -c 'echo "xfce4-session" > /home/rdpuser/.xsession'
+          # Configure XRDP to use KDE Plasma properly
+          sudo bash -c 'echo "startplasma-x11" > /home/rdpuser/.xsession'
           sudo chown rdpuser:rdpuser /home/rdpuser/.xsession
           
           sudo adduser xrdp ssl-cert
