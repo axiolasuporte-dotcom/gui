@@ -23,13 +23,13 @@ jobs:
           sudo apt-get update
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y xfce4 xfce4-goodies xrdp netcat-openbsd
           
-          echo "xfce4-session" > /home/rdpuser/.xsession
+          # Fix: Use sudo bash -c to write the file with root privileges
+          sudo bash -c 'echo "xfce4-session" > /home/rdpuser/.xsession'
           sudo chown rdpuser:rdpuser /home/rdpuser/.xsession
           
           sudo adduser xrdp ssl-cert
           sudo systemctl restart xrdp
 
-      # --- This is the most reliable way to use Tailscale in GitHub Actions ---
       - name: Connect to Tailscale
         uses: tailscale/github-action@v2
         with:
@@ -38,8 +38,6 @@ jobs:
 
       - name: Verify RDP Accessibility
         run: |
-          # The official action automatically sets the Tailscale IP to $TAILSCALE_IP
-          # Wait a few seconds for the network to settle
           sleep 5 
           
           TS_IP=$(tailscale ip -4)
