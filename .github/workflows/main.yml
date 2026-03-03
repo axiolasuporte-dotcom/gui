@@ -1,100 +1,70 @@
-- name: Create RDP User with Secure Password
-    run: |
-      set -euxo pipefail
-      PASSWORD=$(openssl rand -base64 12)
-      echo "RDP_CREDS=User: rdpuser | Password: $PASSWORD" >> $GITHUB_ENV
+name: RDP KDE Plasma
 
-      sudo useradd -m -s /bin/bash rdpuser || true
-      echo "rdpuser:$PASSWORD" | sudo chpasswd
-      sudo usermod -aG sudo rdpuser
+on:
+  workflow_dispatch:
 
-  - name: Install KDE Plasma + XRDP (fixed HOME / runner env)
-    run: |
-      set -euxo pipefail
+jobs:
+  build:
+    runs-on: ubuntu-22.04
 
-      sudo apt-get update
+    steps:
+      - name: Create RDP User with Secure Password
+        run: |
+          set -euxo pipefail
+          PASSWORD=$(openssl rand -base64 12)
+          echo "RDP_CREDS=User: rdpuser | Password: $PASSWORD" >> $GITHUB_ENV
 
-      # KDE Plasma + XRDP using Xorg backend (important)
-      sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
-        xrdp xorgxrdp \
-        kde-plasma-desktop plasma-workspace \
-        dbus-x11 x11-xserver-utils \
-        firefox
+          sudo useradd -m -s /bin/bash rdpuser || true
+          echo "rdpuser:$PASSWORD" | sudo chpasswd
+          sudo usermod -aG sudo rdpuser
 
-      # Make sure rdpuser owns its home (avoid "not writable")
-      sudo mkdir -p /home/rdpuser
-      sudo chown -R rdpuser:rdpuser /home/rdpuser
-      sudo chmod 755 /home/rdpuser
+      - name: Install KDE Plasma + XRDP
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
 
-      # Ensure KDE session launches
-      sudo -u rdpuser bash -lc 'echo "startplasma-x11" > ~/.xsession'
-      sudo chmod 644 /home/rdpuser/.xsession
-      sudo chown rdpuser:rdpuser /home/rdpuser/.xsession
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            xrdp xorgxrdp \
+            kde-plasma-desktop plasma-workspace \
+            dbus-x11 x11-xserver-utils \
+            firefox
 
-      # ✅ CRITICAL FIX:
-      # Force correct HOME/USER for the XRDP session (prevents /home/runner being used)
-      sudo bash -c 'cat > /etc/xrdp/startwm.sh' <<'EOF'
-      #!/bin/sh
-      set -e
+          sudo mkdir -p /home/rdpuser
+          sudo chown -R rdpuser:rdpuser /home/rdpuser
+          sudo chmod 755 /home/rdpuser
 
-      # Some CI environments leak HOME=/home/runner into the session.
-      # Force HOME based on the authenticated XRDP user.
-      export USER="${LOGNAME:-$(id -un)}"
-      export HOME="/home/$USER"
-      export XDG_CONFIG_HOME="$HOME/.config"
-      export XDG_CACHE_HOME="$HOME/.cache"
-      export XDG_DATA_HOME="$HOME/.local/share"
+          sudo -u rdpuser bash -lc 'echo "startplasma-x11" > ~/.xsession'
 
-      # Clean broken auth files that can cause black screen / failsafe
-      rm -f "$HOME/.Xauthority" "$HOME/.ICEauthority"
+          sudo bash -c 'cat > /etc/xrdp/startwm.sh' << "EOF"
+          #!/bin/sh
+          export USER="${LOGNAME:-$(id -un)}"
+          export HOME="/home/$USER"
+          export XDG_CONFIG_HOME="$HOME/.config"
+          export XDG_CACHE_HOME="$HOME/.cache"
+          export XDG_DATA_HOME="$HOME/.local/share"
 
-      # Make sure home exists and is writable
-      mkdir -p "$HOME" "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME" "$XDG_DATA_HOME"
-      chown -R "$USER:$USER" "$HOME" || true
+          rm -f "$HOME/.Xauthority" "$HOME/.ICEauthority"
 
-      # Start KDE Plasma X11
-      exec startplasma-x11
-      EOF
+          mkdir -p "$HOME"
+          chown -R "$USER:$USER" "$HOME" || true
 
-      sudo chmod +x /etc/xrdp/startwm.sh
+          exec startplasma-x11
+          EOF
 
-      # XRDP cert group (normal)
-      sudo adduser xrdp ssl-cert || true
+          sudo chmod +x /etc/xrdp/startwm.sh
 
-      sudo systemctl enable xrdp
-      sudo systemctl restart xrdp
+          sudo adduser xrdp ssl-cert || true
+          sudo systemctl restart xrdp
 
-  - name: Connect to Tailscale
-    uses: tailscale/github-action@v2
-    with:
-      authkey: ${{ secrets.TAILSCALE_AUTH_KEY }}
-      hostname: gh-runner-ubuntu-${{ github.run_id }}
+      - name: Show RDP Credentials
+        run: |
+          echo "======================"
+          echo "$RDP_CREDS"
+          echo "======================"
 
-  - name: Verify RDP Accessibility
-    run: |
-      set -euxo pipefail
-      sleep 5
-
-      TS_IP=$(tailscale ip -4)
-      echo "TAILSCALE_IP=$TS_IP" >> $GITHUB_ENV
-      echo "Tailscale IP: $TS_IP"
-
-      if nc -z localhost 3389; then
-        echo "TCP connectivity successful! XRDP is listening."
-      else
-        echo "TCP connection to RDP port 3389 failed"
-        exit 1
-      fi
-
-  - name: Maintain Connection
-    run: |
-      echo " "
-      echo "=== RDP ACCESS ==="
-      echo "Address: $TAILSCALE_IP"
-      echo "$RDP_CREDS"
-      echo "=================="
-      echo " "
-      while true; do
-        echo "[$(date)] RDP Active - Cancel workflow manually to terminate"
-        sleep 300
-      done
+      - name: Keep Session Alive
+        run: |
+          while true; do
+            echo "RDP Active..."
+            sleep 300
+          done
