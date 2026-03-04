@@ -1,4 +1,4 @@
-name: RDP (LocalXpose via NPM)
+name: RDP (LocalXpose via npm)
 
 on:
   workflow_dispatch:
@@ -9,7 +9,7 @@ jobs:
     timeout-minutes: 360
 
     steps:
-      - name: Setup RDP
+      - name: Setup RDP (XRDP + XFCE)
         run: |
           set -euxo pipefail
 
@@ -30,27 +30,43 @@ jobs:
 
           sudo systemctl restart xrdp
 
-      - name: Install LocalXpose (loclx) via npm
+      - name: Install LocalXpose (npm) + fix PATH
         run: |
           set -euxo pipefail
 
           sudo apt update
           sudo apt install -y nodejs npm
 
-          # método oficial: npm install -g loclx
           sudo npm install -g loclx
 
-          # só pra confirmar que existe
-          loclx --help | head -n 5
+          NPM_BIN="$(npm bin -g)"
+          echo "npm global bin: $NPM_BIN"
+
+          # add to PATH for next steps
+          echo "$NPM_BIN" >> $GITHUB_PATH
+
+          # also for current step (test now)
+          export PATH="$NPM_BIN:$PATH"
+
+          which loclx || true
+          loclx --help || true
 
       - name: Start LocalXpose tunnel (TCP 3389)
         run: |
           set -euxo pipefail
 
-          loclx account login --token ${{ secrets.LOCXL_AUTH_TOKEN }}
+          NPM_BIN="$(npm bin -g)"
+          export PATH="$NPM_BIN:$PATH"
 
-          # inicia o túnel em background e mostra logs
-          loclx tunnel tcp --to localhost:3389 > tunnel.log 2>&1 &
+          if command -v loclx >/dev/null 2>&1; then
+            LOC="loclx"
+          else
+            LOC="npx -y loclx"
+          fi
+
+          $LOC account login --token ${{ secrets.LOCXL_AUTH_TOKEN }}
+
+          $LOC tunnel tcp --to localhost:3389 > tunnel.log 2>&1 &
           sleep 10
 
           echo "========== TUNNEL LOG =========="
