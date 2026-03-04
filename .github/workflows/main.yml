@@ -21,29 +21,25 @@ jobs:
           echo "rdpuser:$PASSWORD" | sudo chpasswd
           sudo usermod -aG sudo rdpuser
 
-      - name: Install KDE Plasma + XRDP (fix HOME/env)
+      - name: Install KDE Plasma + XRDP
         run: |
           set -euxo pipefail
+
           sudo apt-get update
 
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
             xrdp xorgxrdp \
             kde-plasma-desktop plasma-workspace \
             dbus-x11 x11-xserver-utils \
-            netcat-openbsd curl
+            ssl-cert curl
 
-          # Ensure home perms are correct
           sudo mkdir -p /home/rdpuser
           sudo chown -R rdpuser:rdpuser /home/rdpuser
           sudo chmod 755 /home/rdpuser
 
-          # Start KDE session for rdpuser
           sudo -u rdpuser bash -lc 'echo "startplasma-x11" > ~/.xsession'
-          sudo chmod 644 /home/rdpuser/.xsession
-          sudo chown rdpuser:rdpuser /home/rdpuser/.xsession
 
-          # XRDP start script: FORCE correct HOME (prevents /home/runner bugs)
-          sudo bash -c 'cat > /etc/xrdp/startwm.sh' <<'EOF'
+          sudo bash -c 'cat > /etc/xrdp/startwm.sh' << "EOF"
           #!/bin/sh
           set -e
 
@@ -64,68 +60,47 @@ jobs:
           sudo chmod +x /etc/xrdp/startwm.sh
 
           sudo adduser xrdp ssl-cert || true
-          sudo systemctl restart xrdp
+          sudo make-ssl-cert generate-default-snakeoil --force-overwrite
 
-          # Sanity check
-          nc -zv localhost 3389
+          sudo systemctl daemon-reload
+          sudo systemctl enable --now xrdp xrdp-sesman
+          sudo systemctl restart xrdp xrdp-sesman
 
       - name: Install ngrok
         run: |
-          set -euxo pipefail
           curl -fsSL https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.tgz -o ngrok.tgz
           tar -xzf ngrok.tgz
           sudo mv ngrok /usr/local/bin/ngrok
-          ngrok version
 
-      - name: Auth ngrok
+      - name: Authenticate ngrok
         run: |
-          set -euxo pipefail
-          ngrok config add-authtoken "${{ secrets.NGROK_AUTH_TOKEN }}"
+          ngrok config add-authtoken ${{ secrets.NGROK_AUTH_TOKEN }}
 
-      - name: Start ngrok TCP tunnel (RDP)
+      - name: Start ngrok tunnel
         run: |
-          set -euxo pipefail
-
-          # Start tunnel in background
           nohup ngrok tcp 3389 --log=stdout > ngrok.log 2>&1 &
-          sleep 4
+          sleep 8
 
-          # Read tunnel info from ngrok local API
-          # (ngrok starts an API on 127.0.0.1:4040 by default)
-          for i in {1..20}; do
-            if curl -fsS http://127.0.0.1:4040/api/tunnels >/tmp/tunnels.json; then
-              break
-            fi
-            sleep 1
-          done
-
-          echo "=== RDP CREDS ==="
+          echo "====== RDP CREDS ======"
           echo "User: $RDP_USER"
           echo "Pass: $RDP_PASS"
-          echo "================="
+          echo "======================="
 
-          echo "=== NGROK ADDRESS ==="
-          cat /tmp/tunnels.json | python3 - <<'PY'
-          import json, sys
-          data = json.load(sys.stdin)
-          tunnels = data.get("tunnels", [])
-          tcp = None
-          for t in tunnels:
-            if t.get("proto") == "tcp":
-              tcp = t.get("public_url")
-              break
-          if not tcp:
-            print("Could not find tcp tunnel. Printing ngrok.log:\n")
-            sys.exit(1)
-          # public_url looks like: tcp://0.tcp.ngrok.io:12345
-          print("Connect to:", tcp.replace("tcp://", ""))
-          print("Port: 3389 (already included in address)")
-          PY
-          echo "====================="
+          curl -s http://127.0.0.1:4040/api/tunnels > tunnels.json
 
-      - name: Keep alive
+          echo "====== RDP ADDRESS ======"
+          cat tunnels.json | python3 - << 'EOF'
+import json,sys
+data=json.load(sys.stdin)
+for t in data["tunnels"]:
+    if t["proto"]=="tcp":
+        print(t["public_url"].replace("tcp://",""))
+EOF
+          echo "========================="
+
+      - name: Keep machine alive
         run: |
           while true; do
-            echo "[$(date)] RDP + ngrok active"
+            echo "RDP running..."
             sleep 300
           done
