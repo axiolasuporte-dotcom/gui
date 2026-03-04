@@ -1,4 +1,4 @@
-name: Chrome Remote Desktop (XFCE)
+name: Chrome Remote Desktop (KDE Plasma)
 
 on:
   workflow_dispatch:
@@ -9,24 +9,34 @@ jobs:
     timeout-minutes: 360
 
     steps:
-      - name: Install Chrome Remote Desktop + XFCE
+      - name: Install Chrome Remote Desktop + KDE Plasma
         run: |
           set -euxo pipefail
 
           sudo apt-get update
+
+          # Evita prompts (tipo escolher display manager)
+          echo "sddm shared/default-x-display-manager select sddm" | sudo debconf-set-selections
+
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
             wget curl \
-            xfce4 desktop-base dbus-x11 xscreensaver
+            dbus-x11 x11-xserver-utils \
+            kde-standard konsole dolphin \
+            xscreensaver
 
-          # Install Chrome Remote Desktop host (.deb official download)
+          # Instala o host do Chrome Remote Desktop
           wget -O crd.deb https://dl.google.com/linux/direct/chrome-remote-desktop_current_amd64.deb
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y ./crd.deb || true
           sudo apt-get -f install -y
 
-          # Tell CRD to start XFCE session
-          sudo bash -c 'echo "exec /etc/X11/Xsession /usr/bin/xfce4-session" > /etc/chrome-remote-desktop-session'
+          # Diz pro CRD iniciar o KDE Plasma (X11)
+          sudo bash -c 'cat > /etc/chrome-remote-desktop-session <<EOF
+          export DESKTOP_SESSION=plasma
+          export XDG_SESSION_DESKTOP=KDE
+          export XDG_CURRENT_DESKTOP=KDE
+          exec /usr/bin/startplasma-x11
+          EOF'
 
-          # Make sure service files are available
           sudo systemctl daemon-reload
 
       - name: Start Chrome Remote Desktop host (headless)
@@ -41,8 +51,6 @@ jobs:
             exit 1
           fi
 
-          # Start-host command (headless). Code is single-use and expires quickly.
-          # PIN will be prompted twice; we feed it non-interactively.
           DISPLAY= /opt/google/chrome-remote-desktop/start-host \
             --code="${CRD_CODE}" \
             --redirect-url="https://remotedesktop.google.com/_/oauthredirect" \
@@ -53,7 +61,6 @@ jobs:
 
           echo "==== CRD READY ===="
           echo "Open: remotedesktop.google.com/access"
-          echo "Sign in with the SAME Google account used to generate CRD_CODE."
           echo "Select this machine: $(hostname)"
           echo "==================="
 
