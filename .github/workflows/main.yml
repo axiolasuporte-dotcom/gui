@@ -20,7 +20,10 @@ jobs:
           sudo useradd -m rdpuser || true
           echo "rdpuser:$PASSWORD" | sudo chpasswd
 
-          echo xfce4-session > /home/rdpuser/.xsession
+          sudo mkdir -p /home/rdpuser
+          sudo chown -R rdpuser:rdpuser /home/rdpuser
+
+          echo "startxfce4" | sudo tee /home/rdpuser/.xsession > /dev/null
           sudo chown rdpuser:rdpuser /home/rdpuser/.xsession
 
           sudo systemctl restart xrdp
@@ -38,8 +41,10 @@ jobs:
           sleep 10
           cat ngrok.log
 
+          echo "====== LOGIN ======"
           echo "User: rdpuser"
           echo "Password: $PASSWORD"
+          echo "==================="
 
       - name: Keep alive
         run: |
