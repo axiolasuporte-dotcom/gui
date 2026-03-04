@@ -1,47 +1,49 @@
 name: RDP
 
 on:
-workflow_dispatch:
+  workflow_dispatch:
 
 jobs:
-build:
-runs-on: ubuntu-22.04
-timeout-minutes: 360
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
 
-steps:
-  - name: Setup RDP
-    run: |
-      sudo apt update
-      sudo apt install -y xrdp xfce4 xfce4-goodies curl
+    steps:
+      - name: Setup RDP
+        run: |
+          sudo apt update
+          sudo apt install -y xrdp xfce4 xfce4-goodies curl
 
-      PASSWORD=$(openssl rand -base64 10)
-      echo "PASSWORD=$PASSWORD" >> $GITHUB_ENV
+          PASSWORD=$(openssl rand -base64 10)
+          echo "PASSWORD=$PASSWORD" >> $GITHUB_ENV
 
-      sudo useradd -m rdpuser || true
-      echo "rdpuser:$PASSWORD" | sudo chpasswd
+          sudo useradd -m rdpuser || true
+          echo "rdpuser:$PASSWORD" | sudo chpasswd
 
-      echo xfce4-session > ~/.xsession
-      sudo systemctl restart xrdp
+          echo xfce4-session > /home/rdpuser/.xsession
+          sudo chown rdpuser:rdpuser /home/rdpuser/.xsession
 
-  - name: Install ngrok
-    run: |
-      curl -L https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.tgz -o ngrok.tgz
-      tar -xzf ngrok.tgz
-      sudo mv ngrok /usr/local/bin
+          sudo systemctl restart xrdp
 
-  - name: Start tunnel
-    run: |
-      ngrok config add-authtoken ${{ secrets.NGROK_AUTH_TOKEN }}
-      ngrok tcp 3389 > ngrok.log &
-      sleep 10
-      cat ngrok.log
+      - name: Install ngrok
+        run: |
+          curl -L https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.tgz -o ngrok.tgz
+          tar -xzf ngrok.tgz
+          sudo mv ngrok /usr/local/bin/ngrok
 
-      echo "User: rdpuser"
-      echo "Password: $PASSWORD"
+      - name: Start tunnel
+        run: |
+          ngrok config add-authtoken ${{ secrets.NGROK_AUTH_TOKEN }}
+          ngrok tcp 3389 --log stdout > ngrok.log &
+          sleep 10
+          cat ngrok.log
 
-  - name: Keep alive
-    run: |
-      while true; do
-        echo "running..."
-        sleep 300
-      done
+          echo "User: rdpuser"
+          echo "Password: $PASSWORD"
+
+      - name: Keep alive
+        run: |
+          while true; do
+            echo "running..."
+            sleep 300
+          done
