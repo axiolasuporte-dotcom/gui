@@ -39,14 +39,12 @@ jobs:
 
           sudo npm install -g loclx
 
-          NPM_BIN="$(npm bin -g)"
-          echo "npm global bin: $NPM_BIN"
-
-          # add to PATH for next steps
-          echo "$NPM_BIN" >> $GITHUB_PATH
-
-          # also for current step (test now)
-          export PATH="$NPM_BIN:$PATH"
+          # npm bin -g may be missing on some runner npm builds.
+          # Use prefix -g instead, and add PREFIX/bin to PATH.
+          PREFIX="$(npm prefix -g)"
+          echo "npm global prefix: $PREFIX"
+          echo "$PREFIX/bin" >> $GITHUB_PATH
+          export PATH="$PREFIX/bin:$PATH"
 
           which loclx || true
           loclx --help || true
@@ -55,8 +53,8 @@ jobs:
         run: |
           set -euxo pipefail
 
-          NPM_BIN="$(npm bin -g)"
-          export PATH="$NPM_BIN:$PATH"
+          PREFIX="$(npm prefix -g)"
+          export PATH="$PREFIX/bin:$PATH"
 
           if command -v loclx >/dev/null 2>&1; then
             LOC="loclx"
