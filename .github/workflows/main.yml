@@ -1,106 +1,61 @@
 name: RDP KDE Plasma (ngrok)
 
 on:
-  workflow_dispatch:
+workflow_dispatch:
 
 jobs:
-  rdp:
-    runs-on: ubuntu-22.04
-    timeout-minutes: 360
+rdp:
+runs-on: ubuntu-22.04
+timeout-minutes: 360
 
-    steps:
-      - name: Create RDP user + password
-        run: |
-          set -euxo pipefail
+steps:
+  - name: Create RDP user
+    run: |
+      PASSWORD=$(openssl rand -base64 12)
+      echo "RDP_PASS=$PASSWORD" >> $GITHUB_ENV
+      sudo useradd -m -s /bin/bash rdpuser || true
+      echo "rdpuser:$PASSWORD" | sudo chpasswd
+      sudo usermod -aG sudo rdpuser
 
-          PASSWORD="$(openssl rand -base64 16 | tr -d '=+/')"
-          echo "RDP_USER=rdpuser" >> "$GITHUB_ENV"
-          echo "RDP_PASS=$PASSWORD" >> "$GITHUB_ENV"
+  - name: Install KDE + XRDP
+    run: |
+      sudo apt update
+      sudo DEBIAN_FRONTEND=noninteractive apt install -y \
+      xrdp xorgxrdp \
+      kde-plasma-desktop \
+      dbus-x11 \
+      ssl-cert curl
 
-          sudo useradd -m -s /bin/bash rdpuser || true
-          echo "rdpuser:$PASSWORD" | sudo chpasswd
-          sudo usermod -aG sudo rdpuser
+      echo "startplasma-x11" | sudo tee /home/rdpuser/.xsession
+      sudo chown rdpuser:rdpuser /home/rdpuser/.xsession
 
-      - name: Install KDE Plasma + XRDP
-        run: |
-          set -euxo pipefail
+      sudo systemctl enable xrdp
+      sudo systemctl restart xrdp
 
-          sudo apt-get update
+  - name: Install ngrok
+    run: |
+      curl -L https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.tgz -o ngrok.tgz
+      tar -xzf ngrok.tgz
+      sudo mv ngrok /usr/local/bin
 
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
-            xrdp xorgxrdp \
-            kde-plasma-desktop plasma-workspace \
-            dbus-x11 x11-xserver-utils \
-            ssl-cert curl
+  - name: Authenticate ngrok
+    run: |
+      ngrok config add-authtoken ${{ secrets.NGROK_AUTH_TOKEN }}
 
-          sudo mkdir -p /home/rdpuser
-          sudo chown -R rdpuser:rdpuser /home/rdpuser
-          sudo chmod 755 /home/rdpuser
+  - name: Start ngrok
+    run: |
+      ngrok tcp 3389 --log stdout > ngrok.log &
+      sleep 10
+      cat ngrok.log
 
-          sudo -u rdpuser bash -lc 'echo "startplasma-x11" > ~/.xsession'
+      echo "====== RDP LOGIN ======"
+      echo "User: rdpuser"
+      echo "Password: $RDP_PASS"
+      echo "======================="
 
-          sudo bash -c 'cat > /etc/xrdp/startwm.sh' << "EOF"
-          #!/bin/sh
-          set -e
-
-          export USER="${LOGNAME:-$(id -un)}"
-          export HOME="/home/$USER"
-          export XDG_CONFIG_HOME="$HOME/.config"
-          export XDG_CACHE_HOME="$HOME/.cache"
-          export XDG_DATA_HOME="$HOME/.local/share"
-
-          rm -f "$HOME/.Xauthority" "$HOME/.ICEauthority"
-
-          mkdir -p "$HOME" "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME" "$XDG_DATA_HOME"
-          chown -R "$USER:$USER" "$HOME" || true
-
-          exec startplasma-x11
-          EOF
-
-          sudo chmod +x /etc/xrdp/startwm.sh
-
-          sudo adduser xrdp ssl-cert || true
-          sudo make-ssl-cert generate-default-snakeoil --force-overwrite
-
-          sudo systemctl daemon-reload
-          sudo systemctl enable --now xrdp xrdp-sesman
-          sudo systemctl restart xrdp xrdp-sesman
-
-      - name: Install ngrok
-        run: |
-          curl -fsSL https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.tgz -o ngrok.tgz
-          tar -xzf ngrok.tgz
-          sudo mv ngrok /usr/local/bin/ngrok
-
-      - name: Authenticate ngrok
-        run: |
-          ngrok config add-authtoken ${{ secrets.NGROK_AUTH_TOKEN }}
-
-      - name: Start ngrok tunnel
-        run: |
-          nohup ngrok tcp 3389 --log=stdout > ngrok.log 2>&1 &
-          sleep 8
-
-          echo "====== RDP CREDS ======"
-          echo "User: $RDP_USER"
-          echo "Pass: $RDP_PASS"
-          echo "======================="
-
-          curl -s http://127.0.0.1:4040/api/tunnels > tunnels.json
-
-          echo "====== RDP ADDRESS ======"
-          cat tunnels.json | python3 - << 'EOF'
-import json,sys
-data=json.load(sys.stdin)
-for t in data["tunnels"]:
-    if t["proto"]=="tcp":
-        print(t["public_url"].replace("tcp://",""))
-EOF
-          echo "========================="
-
-      - name: Keep machine alive
-        run: |
-          while true; do
-            echo "RDP running..."
-            sleep 300
-          done
+  - name: Keep Alive
+    run: |
+      while true; do
+        echo "RDP running..."
+        sleep 300
+      done
