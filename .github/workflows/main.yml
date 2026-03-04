@@ -13,50 +13,47 @@ jobs:
         run: |
           sudo apt update
           sudo apt install -y xrdp xfce4 xfce4-goodies curl unzip
-    run: |
-      sudo apt update
-      sudo apt install -y xrdp xfce4 xfce4-goodies curl unzip
 
-      PASSWORD=$(openssl rand -base64 10)
-      echo "PASSWORD=$PASSWORD" >> $GITHUB_ENV
+          PASSWORD=$(openssl rand -base64 10)
+          echo "PASSWORD=$PASSWORD" >> $GITHUB_ENV
 
-      sudo useradd -m rdpuser || true
-      echo "rdpuser:$PASSWORD" | sudo chpasswd
+          sudo useradd -m rdpuser || true
+          echo "rdpuser:$PASSWORD" | sudo chpasswd
 
-      sudo mkdir -p /home/rdpuser
-      sudo chown -R rdpuser:rdpuser /home/rdpuser
+          sudo mkdir -p /home/rdpuser
+          sudo chown -R rdpuser:rdpuser /home/rdpuser
 
-      echo "startxfce4" | sudo tee /home/rdpuser/.xsession > /dev/null
-      sudo chown rdpuser:rdpuser /home/rdpuser/.xsession
+          echo "startxfce4" | sudo tee /home/rdpuser/.xsession > /dev/null
+          sudo chown rdpuser:rdpuser /home/rdpuser/.xsession
 
-      sudo systemctl restart xrdp
+          sudo systemctl restart xrdp
 
-  - name: Install LocalXpose
-    run: |
-      curl -L https://loclx.io/loclx-linux-amd64.zip -o loclx.zip
-      unzip loclx.zip
-      sudo mv loclx /usr/local/bin/loclx
-      sudo chmod +x /usr/local/bin/loclx
+      - name: Install LocalXpose
+        run: |
+          curl -L https://loclx.io/loclx-linux-amd64.zip -o loclx.zip
+          unzip loclx.zip
+          sudo mv loclx /usr/local/bin/loclx
+          sudo chmod +x /usr/local/bin/loclx
 
-  - name: Start tunnel
-    run: |
-      loclx account login --token ${{ secrets.LOCXL_AUTH_TOKEN }}
+      - name: Start tunnel
+        run: |
+          loclx account login --token ${{ secrets.LOCXL_AUTH_TOKEN }}
 
-      loclx tunnel tcp --to localhost:3389 > tunnel.log 2>&1 &
-      sleep 10
+          loclx tunnel tcp --to localhost:3389 > tunnel.log 2>&1 &
+          sleep 10
 
-      echo "========== TUNNEL =========="
-      cat tunnel.log
-      echo "============================"
+          echo "========== TUNNEL =========="
+          cat tunnel.log
+          echo "============================"
 
-      echo "====== RDP LOGIN ======"
-      echo "User: rdpuser"
-      echo "Password: $PASSWORD"
-      echo "====================="
+          echo "====== RDP LOGIN ======"
+          echo "User: rdpuser"
+          echo "Password: $PASSWORD"
+          echo "====================="
 
-  - name: Keep runner alive
-    run: |
-      while true; do
-        echo "RDP running..."
-        sleep 300
-      done
+      - name: Keep runner alive
+        run: |
+          while true; do
+            echo "RDP running..."
+            sleep 300
+          done
