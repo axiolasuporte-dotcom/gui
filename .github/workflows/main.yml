@@ -1,4 +1,4 @@
-name: RDP (LocalXpose)
+name: RDP (LocalXpose via NPM)
 
 on:
   workflow_dispatch:
@@ -11,8 +11,10 @@ jobs:
     steps:
       - name: Setup RDP
         run: |
+          set -euxo pipefail
+
           sudo apt update
-          sudo apt install -y xrdp xfce4 xfce4-goodies curl unzip
+          sudo apt install -y xrdp xfce4 xfce4-goodies curl
 
           PASSWORD=$(openssl rand -base64 10)
           echo "PASSWORD=$PASSWORD" >> $GITHUB_ENV
@@ -28,23 +30,32 @@ jobs:
 
           sudo systemctl restart xrdp
 
-      - name: Install LocalXpose
+      - name: Install LocalXpose (loclx) via npm
         run: |
-          curl -L https://loclx.io/loclx-linux-amd64.zip -o loclx.zip
-          unzip loclx.zip
-          sudo mv loclx /usr/local/bin/loclx
-          sudo chmod +x /usr/local/bin/loclx
+          set -euxo pipefail
 
-      - name: Start tunnel
+          sudo apt update
+          sudo apt install -y nodejs npm
+
+          # método oficial: npm install -g loclx
+          sudo npm install -g loclx
+
+          # só pra confirmar que existe
+          loclx --help | head -n 5
+
+      - name: Start LocalXpose tunnel (TCP 3389)
         run: |
+          set -euxo pipefail
+
           loclx account login --token ${{ secrets.LOCXL_AUTH_TOKEN }}
 
+          # inicia o túnel em background e mostra logs
           loclx tunnel tcp --to localhost:3389 > tunnel.log 2>&1 &
           sleep 10
 
-          echo "========== TUNNEL =========="
+          echo "========== TUNNEL LOG =========="
           cat tunnel.log
-          echo "============================"
+          echo "==============================="
 
           echo "====== RDP LOGIN ======"
           echo "User: rdpuser"
