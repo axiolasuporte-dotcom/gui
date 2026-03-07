@@ -1,4 +1,4 @@
-name: GOD VM (KDE + CRD + Pinggy + Persist)
+name: GOD VM (KDE + CRD + Persist)
 
 on:
   workflow_dispatch:
@@ -13,7 +13,7 @@ jobs:
     timeout-minutes: 350
 
     steps:
-      - name: Install KDE + tools + XRDP
+      - name: Install KDE + tools
         run: |
           set -euxo pipefail
 
@@ -23,29 +23,31 @@ jobs:
           sudo DEBIAN_FRONTEND=noninteractive apt install -y \
             kde-standard konsole dolphin \
             dbus-x11 x11-xserver-utils \
-            xrdp \
             wget curl unzip gh zstd flatpak \
-            openssh-client \
+            plasma-discover plasma-discover-backend-flatpak \
             xscreensaver \
             fonts-noto fonts-noto-cjk fonts-noto-color-emoji \
             language-pack-pt language-pack-pt-base
 
-          sudo update-locale LANG=pt_BR.UTF-8
-          sudo adduser xrdp ssl-cert || true
-          sudo systemctl enable xrdp
-          sudo systemctl restart xrdp
+          sudo update-locale LANG=pt_BR.UTF-8 LANGUAGE=pt_BR:pt LC_ALL=pt_BR.UTF-8
 
       - name: Install Chrome
         run: |
           set -euxo pipefail
-          wget -O /tmp/google-chrome-stable_current_amd64.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+
+          wget -O /tmp/google-chrome-stable_current_amd64.deb \
+            https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+
           sudo apt install -y /tmp/google-chrome-stable_current_amd64.deb || true
           sudo apt -f install -y
 
       - name: Install CRD
         run: |
           set -euxo pipefail
-          wget -O /tmp/chrome-remote-desktop_current_amd64.deb https://dl.google.com/linux/direct/chrome-remote-desktop_current_amd64.deb
+
+          wget -O /tmp/chrome-remote-desktop_current_amd64.deb \
+            https://dl.google.com/linux/direct/chrome-remote-desktop_current_amd64.deb
+
           sudo apt install -y /tmp/chrome-remote-desktop_current_amd64.deb || true
           sudo apt -f install -y
 
@@ -64,10 +66,11 @@ jobs:
           LINUX_PASS: ${{ secrets.LINUX_PASS }}
         run: |
           set -euxo pipefail
+
           echo "runner:${LINUX_PASS}" | sudo chpasswd
           sudo usermod -aG sudo runner
 
-      - name: Configure KDE (Portuguese, bigger fonts, 2200x990)
+      - name: Configure KDE (pt-BR, bigger fonts, 2200x990)
         run: |
           set -euxo pipefail
 
@@ -103,7 +106,10 @@ jobs:
       - name: Install Flatpak apps
         run: |
           set -euxo pipefail
-          sudo flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+
+          sudo flatpak remote-add --if-not-exists flathub \
+            https://flathub.org/repo/flathub.flatpakrepo
+
           sudo flatpak install -y flathub org.vinegarhq.Vinegar
           sudo flatpak install -y flathub com.discordapp.Discord
           sudo flatpak install -y flathub com.obsproject.Studio
@@ -126,8 +132,7 @@ jobs:
             echo "No previous backup found."
           fi
 
-      - name: Start CRD (optional)
-        continue-on-error: true
+      - name: Start CRD
         env:
           CRD_CODE: ${{ secrets.CRD_CODE }}
           CRD_PIN: ${{ secrets.CRD_PIN }}
@@ -142,63 +147,21 @@ jobs:
           ${CRD_PIN}
           EOF
 
-      - name: Start Pinggy TCP tunnel for XRDP
+      - name: Keep VM alive (save manual with ~/.save_now)
         run: |
           set -euxo pipefail
 
-          mkdir -p /home/runner/.ssh
-          chmod 700 /home/runner/.ssh
-
-          if [ ! -f /home/runner/.ssh/id_ed25519 ]; then
-            ssh-keygen -t ed25519 -N "" -f /home/runner/.ssh/id_ed25519
-          fi
-
-          sudo chown -R runner:runner /home/runner/.ssh
-
-          cat > /home/runner/pinggy-loop.sh <<'EOF'
-          #!/usr/bin/env bash
-          while true; do
-            ssh \
-              -o StrictHostKeyChecking=no \
-              -o UserKnownHostsFile=/dev/null \
-              -o ServerAliveInterval=30 \
-              -o ServerAliveCountMax=3 \
-              -p 443 \
-              -R0:localhost:3389 \
-              tcp@a.pinggy.io 2>&1 | tee -a /tmp/pinggy.log
-            sleep 5
-          done
-          EOF
-
-          chmod +x /home/runner/pinggy-loop.sh
-          nohup bash /home/runner/pinggy-loop.sh >/tmp/pinggy-loop.out 2>&1 &
-
-          sleep 20
-
-          echo "==== PINGGY TCP URL (latest) ===="
-          grep -Eo 'tcp://[^ ]+' /tmp/pinggy.log | tail -n 1 || true
-          echo "================================="
-
-          echo "==== RAW PINGGY LOG ===="
-          tail -n 50 /tmp/pinggy.log || true
-          echo "========================"
-
-      - name: Keep VM alive (auto save if ~/.save_now exists)
-        run: |
-          set -euxo pipefail
-
-          for i in $(seq 1 67); do
-            echo "VM running ($i/67)"
-
-            echo "Latest Pinggy TCP URL:"
-            grep -Eo 'tcp://[^ ]+' /tmp/pinggy.log | tail -n 1 || true
-
+          for i in $(seq 1 335); do
             if [ -f /home/runner/.save_now ]; then
               echo "Manual save requested."
               break
             fi
 
-            sleep 300
+            if [ $((i % 5)) -eq 0 ]; then
+              echo "VM running ($i/335 minutes)"
+            fi
+
+            sleep 60
           done
 
       - name: Backup home
