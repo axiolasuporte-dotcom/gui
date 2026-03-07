@@ -160,11 +160,12 @@ jobs:
           while true; do
             ssh \
               -o StrictHostKeyChecking=no \
+              -o UserKnownHostsFile=/dev/null \
               -o ServerAliveInterval=30 \
               -o ServerAliveCountMax=3 \
               -p 443 \
               -R0:localhost:3389 \
-              qr@a.pinggy.io 2>&1 | tee -a /tmp/pinggy.log
+              tcp@a.pinggy.io 2>&1 | tee -a /tmp/pinggy.log
             sleep 5
           done
           EOF
@@ -172,11 +173,15 @@ jobs:
           chmod +x /home/runner/pinggy-loop.sh
           nohup bash /home/runner/pinggy-loop.sh >/tmp/pinggy-loop.out 2>&1 &
 
-          sleep 15
+          sleep 20
 
           echo "==== PINGGY TCP URL (latest) ===="
           grep -Eo 'tcp://[^ ]+' /tmp/pinggy.log | tail -n 1 || true
           echo "================================="
+
+          echo "==== RAW PINGGY LOG ===="
+          tail -n 50 /tmp/pinggy.log || true
+          echo "========================"
 
       - name: Keep VM alive (auto save if ~/.save_now exists)
         run: |
