@@ -1,4 +1,4 @@
-name: GOD VM (KDE + CRD + Persist)
+name: GOD VM (KDE + CRD + Pinggy + Persist)
 
 on:
   workflow_dispatch:
@@ -13,83 +13,206 @@ jobs:
     timeout-minutes: 350
 
     steps:
+      - name: Install KDE + tools + XRDP
+        run: |
+          set -euxo pipefail
 
-    - name: Install KDE + tools
-      run: |
-        sudo apt update
-        echo "sddm shared/default-x-display-manager select sddm" | sudo debconf-set-selections
+          sudo apt update
+          echo "sddm shared/default-x-display-manager select sddm" | sudo debconf-set-selections
 
-        sudo DEBIAN_FRONTEND=noninteractive apt install -y \
-          kde-standard konsole dolphin \
-          dbus-x11 x11-xserver-utils \
-          wget curl unzip gh zstd flatpak
+          sudo DEBIAN_FRONTEND=noninteractive apt install -y \
+            kde-standard konsole dolphin \
+            dbus-x11 x11-xserver-utils \
+            xrdp \
+            wget curl unzip gh zstd flatpak \
+            openssh-client \
+            xscreensaver \
+            fonts-noto fonts-noto-cjk fonts-noto-color-emoji \
+            language-pack-pt language-pack-pt-base
 
-    - name: Install Chrome
-      run: |
-        wget https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
-        sudo apt install -y ./google-chrome-stable_current_amd64.deb || true
-        sudo apt -f install -y
+          sudo update-locale LANG=pt_BR.UTF-8
+          sudo adduser xrdp ssl-cert || true
+          sudo systemctl enable xrdp
+          sudo systemctl restart xrdp
 
-    - name: Install CRD
-      run: |
-        wget https://dl.google.com/linux/direct/chrome-remote-desktop_current_amd64.deb
-        sudo apt install -y ./chrome-remote-desktop_current_amd64.deb || true
-        sudo apt -f install -y
+      - name: Install Chrome
+        run: |
+          set -euxo pipefail
+          wget -O /tmp/google-chrome-stable_current_amd64.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+          sudo apt install -y /tmp/google-chrome-stable_current_amd64.deb || true
+          sudo apt -f install -y
 
-        sudo bash -c 'cat > /etc/chrome-remote-desktop-session <<EOF
-        export DESKTOP_SESSION=plasma
-        export XDG_SESSION_DESKTOP=KDE
-        export XDG_CURRENT_DESKTOP=KDE
-        exec /usr/bin/startplasma-x11
-        EOF'
+      - name: Install CRD
+        run: |
+          set -euxo pipefail
+          wget -O /tmp/chrome-remote-desktop_current_amd64.deb https://dl.google.com/linux/direct/chrome-remote-desktop_current_amd64.deb
+          sudo apt install -y /tmp/chrome-remote-desktop_current_amd64.deb || true
+          sudo apt -f install -y
 
-    - name: Set password
-      run: |
-        echo "runner:${{ secrets.LINUX_PASS }}" | sudo chpasswd
+          sudo bash -c 'cat > /etc/chrome-remote-desktop-session <<EOF
+          export LANG=pt_BR.UTF-8
+          export LANGUAGE=pt_BR:pt
+          export LC_ALL=pt_BR.UTF-8
+          export DESKTOP_SESSION=plasma
+          export XDG_SESSION_DESKTOP=KDE
+          export XDG_CURRENT_DESKTOP=KDE
+          exec /usr/bin/startplasma-x11
+          EOF'
 
-    - name: Restore backup
-      env:
-        GH_TOKEN: ${{ github.token }}
-      run: |
-        ART=$(gh api repos/${{ github.repository }}/actions/artifacts \
-        --jq '.artifacts[] | select(.name=="vm-backup" and .expired==false) | .id' | head -n 1 || true)
+      - name: Set password and make runner admin
+        env:
+          LINUX_PASS: ${{ secrets.LINUX_PASS }}
+        run: |
+          set -euxo pipefail
+          echo "runner:${LINUX_PASS}" | sudo chpasswd
+          sudo usermod -aG sudo runner
 
-        if [ -n "$ART" ]; then
-          gh api repos/${{ github.repository }}/actions/artifacts/$ART/zip > backup.zip
-          unzip backup.zip
-          sudo tar --zstd -xpf backup-home.tar.zst -C /
-          sudo chown -R runner:runner /home/runner
-        fi
+      - name: Configure KDE (Portuguese, bigger fonts, 2200x990)
+        run: |
+          set -euxo pipefail
 
-    - name: Start CRD
-      run: |
-        DISPLAY= /opt/google/chrome-remote-desktop/start-host \
-          --code="${{ secrets.CRD_CODE }}" \
-          --redirect-url="https://remotedesktop.google.com/_/oauthredirect" \
-          --name="$(hostname)" <<EOF
-        ${{ secrets.CRD_PIN }}
-        ${{ secrets.CRD_PIN }}
-        EOF
+          mkdir -p /home/runner/.config/autostart-scripts
 
-    - name: Keep VM alive
-      run: |
-        for i in $(seq 1 67); do
-          echo "VM running ($i/67)"
-          sleep 300
-        done
+          cat > /home/runner/.config/kcmfonts <<'EOF'
+          [General]
+          forceFontDPI=120
+          EOF
 
-    - name: Backup home
-      run: |
-        sudo tar --zstd -cpf backup-home.tar.zst /home/runner
+          cat > /home/runner/.config/autostart-scripts/setres.sh <<'EOF'
+          #!/usr/bin/env bash
+          export LANG=pt_BR.UTF-8
+          export LANGUAGE=pt_BR:pt
+          export LC_ALL=pt_BR.UTF-8
 
-    - name: Upload backup
-      uses: actions/upload-artifact@v4
-      with:
-        name: vm-backup
-        path: backup-home.tar.zst
-        retention-days: 7
+          for i in {1..25}; do
+            xrandr >/dev/null 2>&1 && break
+            sleep 1
+          done
 
-    - name: Restart workflow
-      run: |
-        gh api repos/${{ github.repository }}/actions/workflows/main.yml/dispatches \
-        -X POST -f ref=main
+          if ! xrandr | grep -q "2200x990_60"; then
+            xrandr --newmode "2200x990_60" 161.00 2200 2280 2488 2776 990 993 998 1034 -hsync +vsync || true
+            xrandr --addmode screen "2200x990_60" || true
+          fi
+
+          xrandr --output screen --mode "2200x990_60" || true
+          EOF
+
+          chmod +x /home/runner/.config/autostart-scripts/setres.sh
+          sudo chown -R runner:runner /home/runner/.config
+
+      - name: Install Flatpak apps
+        run: |
+          set -euxo pipefail
+          sudo flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+          sudo flatpak install -y flathub org.vinegarhq.Vinegar
+          sudo flatpak install -y flathub com.discordapp.Discord
+          sudo flatpak install -y flathub com.obsproject.Studio
+
+      - name: Restore backup
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euxo pipefail
+
+          ART="$(gh api repos/${{ github.repository }}/actions/artifacts \
+            --jq '.artifacts | map(select(.name=="vm-backup" and .expired==false)) | sort_by(.created_at) | last | .id // empty')"
+
+          if [ -n "${ART}" ]; then
+            gh api repos/${{ github.repository }}/actions/artifacts/${ART}/zip > /tmp/backup.zip
+            unzip -o /tmp/backup.zip -d /tmp/restore
+            sudo tar --zstd -xpf /tmp/restore/backup-home.tar.zst -C /
+            sudo chown -R runner:runner /home/runner
+          else
+            echo "No previous backup found."
+          fi
+
+      - name: Start CRD (optional)
+        continue-on-error: true
+        env:
+          CRD_CODE: ${{ secrets.CRD_CODE }}
+          CRD_PIN: ${{ secrets.CRD_PIN }}
+        run: |
+          set -euxo pipefail
+
+          DISPLAY= /opt/google/chrome-remote-desktop/start-host \
+            --code="${CRD_CODE}" \
+            --redirect-url="https://remotedesktop.google.com/_/oauthredirect" \
+            --name="$(hostname)" <<EOF
+          ${CRD_PIN}
+          ${CRD_PIN}
+          EOF
+
+      - name: Start Pinggy TCP tunnel for XRDP
+        run: |
+          set -euxo pipefail
+
+          mkdir -p /home/runner/.ssh
+          chmod 700 /home/runner/.ssh
+
+          if [ ! -f /home/runner/.ssh/id_ed25519 ]; then
+            ssh-keygen -t ed25519 -N "" -f /home/runner/.ssh/id_ed25519
+          fi
+
+          sudo chown -R runner:runner /home/runner/.ssh
+
+          cat > /home/runner/pinggy-loop.sh <<'EOF'
+          #!/usr/bin/env bash
+          while true; do
+            ssh \
+              -o StrictHostKeyChecking=no \
+              -o ServerAliveInterval=30 \
+              -o ServerAliveCountMax=3 \
+              -p 443 \
+              -R0:localhost:3389 \
+              qr@a.pinggy.io 2>&1 | tee -a /tmp/pinggy.log
+            sleep 5
+          done
+          EOF
+
+          chmod +x /home/runner/pinggy-loop.sh
+          nohup bash /home/runner/pinggy-loop.sh >/tmp/pinggy-loop.out 2>&1 &
+
+          sleep 15
+
+          echo "==== PINGGY TCP URL (latest) ===="
+          grep -Eo 'tcp://[^ ]+' /tmp/pinggy.log | tail -n 1 || true
+          echo "================================="
+
+      - name: Keep VM alive (auto save if ~/.save_now exists)
+        run: |
+          set -euxo pipefail
+
+          for i in $(seq 1 67); do
+            echo "VM running ($i/67)"
+
+            echo "Latest Pinggy TCP URL:"
+            grep -Eo 'tcp://[^ ]+' /tmp/pinggy.log | tail -n 1 || true
+
+            if [ -f /home/runner/.save_now ]; then
+              echo "Manual save requested."
+              break
+            fi
+
+            sleep 300
+          done
+
+      - name: Backup home
+        run: |
+          set -euxo pipefail
+          sudo tar --zstd -cpf backup-home.tar.zst /home/runner
+
+      - name: Upload backup
+        uses: actions/upload-artifact@v4
+        with:
+          name: vm-backup
+          path: backup-home.tar.zst
+          retention-days: 7
+
+      - name: Restart workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euxo pipefail
+          gh api repos/${{ github.repository }}/actions/workflows/main.yml/dispatches \
+            -X POST \
+            -f ref="${{ github.ref_name }}"
