@@ -1,25 +1,24 @@
-name: Chrome Remote Desktop (KDE Plasma) + Persist
+name: CRD Token Test
 
 on:
   workflow_dispatch:
 
 permissions:
-  actions: read
+  actions: write
   contents: read
 
 jobs:
   crd:
     runs-on: ubuntu-22.04
-    timeout-minutes: 350 # 5h50: deixa tempo pro backup + upload
+    timeout-minutes: 40
 
     steps:
-      - name: Install Chrome Remote Desktop + KDE Plasma + base tools
+
+      - name: Install KDE + CRD + tools
         run: |
           set -euxo pipefail
-
           sudo apt-get update
 
-          # Evita prompts (tipo escolher display manager)
           echo "sddm shared/default-x-display-manager select sddm" | sudo debconf-set-selections
 
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
@@ -27,16 +26,16 @@ jobs:
             dbus-x11 x11-xserver-utils \
             kde-standard konsole dolphin \
             xscreensaver \
-            flatpak \
-            plasma-discover plasma-discover-backend-flatpak \
+            fonts-noto fonts-noto-cjk fonts-noto-color-emoji \
+            language-pack-pt language-pack-pt-base \
             gh zstd
 
-          # Instala o host do Chrome Remote Desktop
+          sudo update-locale LANG=pt_BR.UTF-8
+
           wget -O crd.deb https://dl.google.com/linux/direct/chrome-remote-desktop_current_amd64.deb
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y ./crd.deb || true
           sudo apt-get -f install -y
 
-          # Diz pro CRD iniciar o KDE Plasma (X11)
           sudo bash -c 'cat > /etc/chrome-remote-desktop-session <<EOF
           export DESKTOP_SESSION=plasma
           export XDG_SESSION_DESKTOP=KDE
@@ -46,121 +45,133 @@ jobs:
 
           sudo systemctl daemon-reload
 
-      - name: Set runner password (for KDE auth dialogs)
+
+      - name: Set runner password
         env:
-          LINUX_PASS: ${{ secrets.LINUX_PASS }}
+          RUNNER_PW: ${{ secrets.RUNNER_PW }}
         run: |
           set -euxo pipefail
-          if [ -z "${LINUX_PASS:-}" ]; then
-            echo "Missing secret LINUX_PASS"
-            exit 1
-          fi
-          echo "runner:${LINUX_PASS}" | sudo chpasswd
+          PW="${RUNNER_PW:-runner}"
+          echo "runner:${PW}" | sudo chpasswd
 
-      - name: Set preferred resolution 2200x990 (create + apply each login)
+
+      - name: Make runner admin
+        run: |
+          set -euxo pipefail
+          sudo usermod -aG sudo runner
+
+
+      - name: Configure KDE fonts (bigger)
         run: |
           set -euxo pipefail
 
-          cat > /home/runner/.xprofile <<'EOF'
-          #!/bin/sh
-          if command -v xrandr >/dev/null 2>&1; then
-            OUT="screen"
-            xrandr --newmode "2200x990_60" 161.00 2200 2280 2488 2776 990 993 998 1034 -hsync +vsync 2>/dev/null || true
-            xrandr --addmode "$OUT" "2200x990_60" 2>/dev/null || true
-            xrandr --output "$OUT" --mode "2200x990_60" 2>/dev/null || true
-          fi
+          mkdir -p /home/runner/.config
+
+          cat > /home/runner/.config/kcmfonts <<EOF
+          [General]
+          forceFontDPI=120
           EOF
 
-          chmod +x /home/runner/.xprofile
-          sudo chown runner:runner /home/runner/.xprofile
+          sudo chown -R runner:runner /home/runner/.config
 
-      - name: Install Google Chrome (profile persists in /home/runner via backup)
-        run: |
-          set -euxo pipefail
-          wget -O /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
-          sudo apt-get install -y /tmp/chrome.deb || true
-          sudo apt-get -f install -y
 
-      - name: Add Flathub + Install Vinegar + Discord
-        run: |
-          set -euxo pipefail
-          sudo flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
-          sudo flatpak install -y flathub org.vinegarhq.Vinegar
-          sudo flatpak install -y flathub com.discordapp.Discord
-
-      - name: Restore latest /home/runner backup artifact (if exists)
+      - name: Restore latest backup (if exists)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euxo pipefail
+
           mkdir -p /tmp/restore
 
           ART_ID="$(gh api repos/${{ github.repository }}/actions/artifacts \
-            --jq '.artifacts[] | select(.name=="home-backup" and .expired==false) | .id' | head -n 1 || true)"
+            --jq '.artifacts | map(select(.name=="crd-test-backup" and .expired==false)) | sort_by(.created_at) | last | .id // empty')"
 
-          if [ -z "${ART_ID:-}" ]; then
-            echo "No previous home-backup artifact found. Skipping restore."
+          if [ -z "${ART_ID}" ]; then
+            echo "No previous backup found."
             exit 0
           fi
 
-          echo "Downloading artifact id=${ART_ID}"
-          gh api -H "Accept: application/vnd.github+json" \
-            repos/${{ github.repository }}/actions/artifacts/${ART_ID}/zip > /tmp/restore/artifact.zip
+          gh api \
+            repos/${{ github.repository }}/actions/artifacts/${ART_ID}/zip \
+            > /tmp/restore/artifact.zip
 
           unzip -o /tmp/restore/artifact.zip -d /tmp/restore
 
           if [ -f /tmp/restore/backup-home.tar.zst ]; then
-            echo "Restoring /home/runner from backup..."
             sudo tar --zstd -xpf /tmp/restore/backup-home.tar.zst -C /
             sudo chown -R runner:runner /home/runner
-          else
-            echo "backup-home.tar.zst not found inside artifact."
           fi
 
-      - name: Start Chrome Remote Desktop host (headless)
+
+      - name: Start CRD (token first, fallback code)
         env:
           CRD_CODE: ${{ secrets.CRD_CODE }}
           CRD_PIN: ${{ secrets.CRD_PIN }}
         run: |
           set -euxo pipefail
 
-          if [ -z "${CRD_CODE:-}" ] || [ -z "${CRD_PIN:-}" ]; then
-            echo "Missing secrets. Add CRD_CODE and CRD_PIN in GitHub repo secrets."
-            exit 1
+          mkdir -p /home/runner/.config/chrome-remote-desktop
+
+          TOKEN_COUNT="$(find /home/runner/.config/chrome-remote-desktop -maxdepth 1 -type f | wc -l || true)"
+
+          STARTED=0
+
+          if [ "${TOKEN_COUNT}" -gt 0 ]; then
+            echo "Trying restored token..."
+            if /opt/google/chrome-remote-desktop/start-host --name="$(hostname)"; then
+              STARTED=1
+            fi
           fi
 
-          DISPLAY= /opt/google/chrome-remote-desktop/start-host \
-            --code="${CRD_CODE}" \
-            --redirect-url="https://remotedesktop.google.com/_/oauthredirect" \
-            --name="$(hostname)" <<EOF
+          if [ "${STARTED}" -eq 0 ]; then
+            echo "Using CRD_CODE..."
+            DISPLAY= /opt/google/chrome-remote-desktop/start-host \
+              --code="${CRD_CODE}" \
+              --redirect-url="https://remotedesktop.google.com/_/oauthredirect" \
+              --name="$(hostname)" <<EOF
           ${CRD_PIN}
           ${CRD_PIN}
           EOF
+          fi
 
           echo "==== CRD READY ===="
-          echo "Open: remotedesktop.google.com/access"
-          echo "Select this machine: $(hostname)"
+          echo "https://remotedesktop.google.com/access"
           echo "==================="
 
-      - name: Keep alive (~5h35), then backup
-        run: |
-          set -euxo pipefail
-          # 5h35 = 20100s -> sobra ~15min pro backup + upload antes do timeout
-          for i in $(seq 1 67); do
-            echo "CRD running... (${i}/67)"
-            sleep 300
-          done
-          echo "Backup phase starting..."
 
-      - name: Create backup of /home/runner
+      - name: Keep alive for 4 minutes
         run: |
           set -euxo pipefail
+          sleep 240
+
+
+      - name: Create backup
+        run: |
+          set -euxo pipefail
+
           sudo mkdir -p /tmp/backup
-          sudo tar --zstd -cpf /tmp/backup/backup-home.tar.zst /home/runner
+
+          sudo tar --zstd -cpf /tmp/backup/backup-home.tar.zst \
+            --exclude=/home/runner/.cache \
+            --exclude=/home/runner/.local/share/Trash \
+            /home/runner
+
 
       - name: Upload backup artifact
         uses: actions/upload-artifact@v4
         with:
-          name: home-backup
+          name: crd-test-backup
           path: /tmp/backup/backup-home.tar.zst
-          retention-days: 7
+          retention-days: 3
+
+
+      - name: Dispatch next run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euxo pipefail
+
+          gh api \
+            repos/${{ github.repository }}/actions/workflows/main.yml/dispatches \
+            -X POST \
+            -f ref="${{ github.ref_name }}"
